@@ -1,0 +1,172 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  a {
+    @apply no-underline text-inherit;
+  }
+  a:visited {
+    color: inherit;
+  }
+  
+  :root {
+    --bg: #0B0F14;
+    --surface: #0F141A;
+    --text: #E6EAF2;
+    --muted: #B9C0CF;
+    --primary: #344CB7;
+    --secondary: #577BC1;
+    --accent: #FFEB00;
+    --ai-1: #4DA3FF;
+    --ai-2: #A855F7;
+    --hero-deep: #000814;
+  }
+  
+  body {
+    background: var(--bg);
+    color: var(--text);
+  }
+}
+
+@keyframes breath {
+  0%, 100% {
+    transform: scale(0.985);
+    opacity: 0.45;
+  }
+  50% {
+    transform: scale(1.03);
+    opacity: 0.78;
+  }
+}
+
+@keyframes drift {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-12px);
+  }
+}
+
+@layer components {
+  .fade-to-bg-b {
+    background: linear-gradient(to bottom, rgba(0,0,0,0) 0%, var(--bg) 85%);
+  }
+}
+
+@layer utilities {
+  /* soft premium headline glow */
+  .text-glow {
+    text-shadow:
+      0 0 22px rgba(120,160,255,.16),
+      0 0 48px rgba(120,160,255,.10),
+      0 10px 30px rgba(0,0,0,.35);
+  }
+
+  /* an approximate mountain silhouette (used to shape the halo) */
+  .clip-mountain {
+    /* polygon tuned for a right-anchored mountain overlay box */
+    clip-path: polygon(
+      54% 12%, 60% 18%, 74% 30%, 86% 45%, 100% 64%,
+      100% 100%, 0% 100%, 0% 68%, 20% 58%, 36% 52%
+    );
+  }
+}
+
+@layer base {
+  :root{
+    --bg-0:#060B12;
+    --bg-1:#0B121B;
+    --line: rgba(255,255,255,0.10);
+    --line-strong: rgba(255,255,255,0.16);
+
+    /* refined accents (cool, minimal) */
+    --ac-1:#3E8BFF; /* blue */
+    --ac-2:#6B70FF; /* indigo */
+
+    --cta-1:#143051;      /* deep steel blue (matches mountain midtones) */
+    --cta-2:#0B1F35;      /* night navy (mountain shadow) */
+    --cta-1H:#1C4977;     /* hover top */
+    --cta-2H:#10273F;     /* hover bottom */
+  }
+}
+
+/* ===== Minimal "glass" (calm) ===== */
+@layer components {
+  .bar {
+    @apply rounded-2xl backdrop-blur-md;
+    /* deep night glass to match hero */
+    background: linear-gradient(180deg, rgba(10,14,22,0.78), rgba(6,10,16,0.64));
+    border: 1px solid rgba(255,255,255,0.06);
+    box-shadow:
+      0 1px 0 rgba(255,255,255,0.04) inset,
+      0 14px 40px rgba(0,0,0,0.45);
+  }
+  .hairline {
+    box-shadow: 0 1px 0 var(--line) inset;
+  }
+
+  /* Base pill (remove visible border look) */
+  .btn-pill{
+    @apply inline-flex items-center justify-center rounded-full px-5 py-3 text-sm md:text-base select-none;
+    color: rgba(255,255,255,.95);
+    border: 1px solid transparent;        /* no gray ring */
+    background: rgba(255,255,255,.04);     /* neutral base */
+    backdrop-filter: blur(10px);
+    transition: background-color .2s ease, transform .2s ease, box-shadow .2s ease;
+    outline: none;                         /* remove default outline */
+  }
+  .btn-pill:hover{ background: rgba(255,255,255,.07); }
+  .btn-pill:active{ transform: translateY(.5px); }
+  .btn-pill:focus{ outline: none; }
+  .btn-pill:focus-visible{
+    box-shadow: 0 0 0 2px rgba(98,160,255,.45);
+  }
+
+  /* PRIMARY — dark gradient that matches the mountain */
+  .btn-primary{
+    border-color: transparent;
+    color: #ECF3FF;
+    background: linear-gradient(180deg, var(--cta-1), var(--cta-2));
+    box-shadow:
+      0 1px 0 rgba(255,255,255,.06) inset,
+      0 10px 24px rgba(4,12,20,.45);
+  }
+  .btn-primary:hover{
+    background: linear-gradient(180deg, var(--cta-1H), var(--cta-2H));
+  }
+
+  /* OUTLINE (secondary) — very subtle ring, no filled blue */
+  .btn-outline{
+    color: rgba(255,255,255,.9);
+    background: rgba(255,255,255,.03);
+    border: 1px solid rgba(255,255,255,.10);
+  }
+  .btn-outline:hover{
+    background: rgba(255,255,255,.06);
+    border-color: rgba(255,255,255,.18);
+  }
+
+  .link-muted { color: var(--ink-80); }
+  .link-muted:hover { color: var(--ink-100); }
+}
+
+html, body { background: var(--bg-0); }
+
+@layer utilities {
+  .animate-breath {
+    animation: breath 7s ease-in-out infinite;
+  }
+  
+  .animate-drift {
+    animation: drift 24s ease-in-out infinite;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-breath,
+  .animate-drift {
+    animation: none !important;
+  }
+}
