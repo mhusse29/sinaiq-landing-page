@@ -204,8 +204,8 @@ export default function InteractiveHero() {
 
       {/* Base mountain (no glow) */}
       <motion.img
-        src="/assets/mountain-cutout.webp?v=9"
-        onError={(e) => { (e.currentTarget as HTMLImageElement).src = "/assets/mountain-cutout.png?v=9"; }}
+        src={`${import.meta.env.BASE_URL}assets/mountain-cutout.webp?v=9`}
+        onError={(e) => { (e.currentTarget as HTMLImageElement).src = `${import.meta.env.BASE_URL}assets/mountain-cutout.png?v=9`; }}
         alt="Mountain"
         style={{
           y: yImg as any,
@@ -223,7 +223,7 @@ export default function InteractiveHero() {
 
       {/* Neon glow — masked to ONLY show around the peak & right ridge */}
       <img
-        src="/assets/mountain-cutout.webp?v=9"
+        src={`${import.meta.env.BASE_URL}assets/mountain-cutout.webp?v=9`}
         alt=""
         aria-hidden="true"
         className="pointer-events-none select-none"
