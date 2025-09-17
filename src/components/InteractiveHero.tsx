@@ -9,8 +9,8 @@ const SKY_CUTOFF = 0.62; // stars/meteor draw only above 62% of hero height
 // Aurora & Fog Configuration
 const EFFECTS_CONFIG = {
   aurora: {
-    intensity: 0.14,        // global max opacity (hard cap)
-    peakIntensity: 0.20,    // local peak alpha spikes
+    intensity: 0.02,        // global max opacity (user's preferred setting)
+    peakIntensity: 0.04,    // local peak alpha spikes (proportionally reduced)
     driftSpeed: 7.5,        // px/s leftward drift (desktop)
     undulationAmp: 11,      // px amplitude for noise undulation
     length: 1400,           // desktop length in px
@@ -19,10 +19,10 @@ const EFFECTS_CONFIG = {
     fadeOutWidth: 0.23,     // fade out over last 23% of width
   },
   fog: {
-    baseOpacity: 0.10,      // at 0% scroll
-    midOpacity: 0.22,       // at 60% scroll
-    maxOpacity: 0.32,       // at 95-100% scroll (capped)
-    scaleRange: [1.00, 1.02], // scale from/to on scroll
+    baseOpacity: 0.15,      // at 0% scroll (increased from 0.10)
+    midOpacity: 0.35,       // at 60% scroll (increased from 0.22) 
+    maxOpacity: 0.55,       // at 95-100% scroll (increased from 0.32)
+    scaleRange: [1.00, 1.04], // scale from/to on scroll (increased)
     driftSpeed: 1.8,        // px/s convection drift
     turbulenceSpeed: 0.02,  // noise wobble speed
     baseHue: 210,          // blue-navy base hue
@@ -483,28 +483,29 @@ function ScrollTriggeredFog({ debugOpacity }: { debugOpacity?: number }) {
       ref={fogRef}
       className="pointer-events-none absolute z-10"
       style={{
-        left: "-10vw",
-        right: "-10vw", 
-        bottom: "-14vh",
-        height: "55vh",
-        filter: "blur(48px)",
+        left: "-12vw",
+        right: "-12vw", 
+        bottom: "-16vh",
+        height: "60vh",
+        filter: "blur(45px)",
         mixBlendMode: "screen",
         transformOrigin: "center bottom",
-        opacity: 0.10,
+        opacity: 0.15,
         background: [
-          // Deep navy base (#0A1A2A) with cyan haze - 3 layered volumetric fields
-          `radial-gradient(80% 90% at 70% 100%, 
-            rgba(10, 26, 42, 0.28), 
-            rgba(15, 35, 55, 0.16) 40%, 
+          // Brighter, more visible fog layers with better contrast
+          `radial-gradient(85% 95% at 70% 100%, 
+            rgba(40, 80, 120, 0.65), 
+            rgba(60, 100, 140, 0.45) 35%, 
+            rgba(30, 70, 110, 0.25) 60%, 
+            transparent 80%)`,
+          `radial-gradient(70% 80% at 55% 100%, 
+            rgba(70, 120, 180, 0.55), 
+            rgba(90, 140, 200, 0.35) 45%, 
             transparent 70%)`,
-          `radial-gradient(65% 75% at 55% 100%, 
-            rgba(25, 45, 75, 0.20), 
-            rgba(35, 60, 95, 0.12) 50%, 
-            transparent 65%)`,
-          `radial-gradient(95% 65% at 50% 100%, 
-            rgba(70, 160, 220, 0.16), 
-            rgba(90, 180, 240, 0.08) 45%, 
-            transparent 55%)`
+          `radial-gradient(100% 70% at 50% 100%, 
+            rgba(100, 180, 255, 0.45), 
+            rgba(120, 200, 255, 0.25) 40%, 
+            transparent 60%)`
         ].join(", "),
       }}
     />
@@ -527,7 +528,8 @@ function SceneDebugPanel({
   enabled: boolean;
   setEnabled: (v: boolean) => void;
 }) {
-  if (import.meta.env.PROD) return null; // Only show in development
+  // Debug panel is now hidden - return null
+  return null;
   
   return (
     <div className="fixed top-4 right-4 z-[60] bg-black/80 backdrop-blur-sm rounded-lg p-4 text-white text-sm font-mono">
@@ -561,7 +563,7 @@ function SceneDebugPanel({
             <input
               type="range"
               min="0"
-              max="0.35"
+              max="0.8"
               step="0.01"
               value={fogOpacity}
               onChange={(e) => setFogOpacity(parseFloat(e.target.value))}
@@ -583,10 +585,10 @@ function SceneDebugPanel({
 export default function InteractiveHero() {
   const wrap = useRef<HTMLElement>(null);
   
-  // Debug state (dev only)
+  // Debug state (dev only) - hidden in production
   const [debugEnabled, setDebugEnabled] = useState(false);
-  const [debugAuroraIntensity, setDebugAuroraIntensity] = useState(EFFECTS_CONFIG.aurora.intensity);
-  const [debugFogOpacity, setDebugFogOpacity] = useState(EFFECTS_CONFIG.fog.baseOpacity);
+  const [debugAuroraIntensity, setDebugAuroraIntensity] = useState(0.02); // User's preferred aurora intensity
+  const [debugFogOpacity, setDebugFogOpacity] = useState(EFFECTS_CONFIG.fog.midOpacity);
 
   // subtle parallax on scroll (optional)
   const { scrollYProgress } = useScroll({ target: wrap, offset: ["start start","end start"]});
