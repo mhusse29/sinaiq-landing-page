@@ -6,6 +6,26 @@ import PillButton from "./ui/PillButton";
 // ===== CONFIG =====
 const SKY_CUTOFF = 0.62; // stars/meteor draw only above 62% of hero height
 
+// Aurora & Fog Configuration
+const EFFECTS_CONFIG = {
+  aurora: {
+    intensity: 0.32,        // max opacity
+    hueShiftSpeed: 0.05,    // color cycle speed (0.02 = slower, 0.08 = faster)
+    motionSpeed: 10,        // px/s noise movement
+    baseHue: 140,          // neon green base hue
+    length: 1200,          // desktop length in px
+    thickness: 120,        // base thickness in px
+    fps: 35,               // target FPS
+  },
+  fog: {
+    intensity: 0.35,       // max opacity on scroll
+    driftSpeed: 1.5,       // px/s horizontal drift
+    turbulenceSpeed: 0.03, // noise animation speed
+    scaleRange: [1.00, 1.03], // scale from/to on scroll
+    baseHue: 210,         // blue-gray base hue
+  }
+};
+
 /* ---------- Stars (subtle twinkle, sky only) ---------- */
 function Stars({ count = 300 }: { count?: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
@@ -170,165 +190,289 @@ function Meteor() {
   return <canvas ref={ref} className="absolute inset-0 z-0 pointer-events-none" />;
 }
 
-/* ---------- Aurora crest (subtle ribbon near right ridge) ---------- */
-function AuroraCrest() {
+/* ---------- Realistic Neon-Green Aurora ---------- */
+function RealisticAurora() {
   const ref = useRef<HTMLCanvasElement>(null);
+  
   useEffect(() => {
     const canvas = ref.current!;
     const ctx = canvas.getContext("2d", { alpha: true })!;
     let dpr = Math.min(window.devicePixelRatio || 1, 2);
-    let raf = 0; let timer: number | undefined; let running = true;
+    let raf = 0, running = true, hidden = false;
+    let t0 = performance.now();
+    
+    const { aurora: cfg } = EFFECTS_CONFIG;
+    const targetInterval = 1000 / cfg.fps;
+    let lastFrame = 0;
+
+    // Simple noise function (pseudo-Perlin)
+    const noise = (x: number, y: number, time: number): number => {
+      const a = Math.sin(x * 0.01 + time * 0.001) * Math.cos(y * 0.008 + time * 0.0008);
+      const b = Math.sin(x * 0.017 + time * 0.0006) * Math.cos(y * 0.013 + time * 0.0012);
+      return (a + b) * 0.5;
+    };
 
     const resize = () => {
       const p = canvas.parentElement!;
-      canvas.width  = Math.max(1, Math.floor(p.clientWidth  * dpr));
+      canvas.width = Math.max(1, Math.floor(p.clientWidth * dpr));
       canvas.height = Math.max(1, Math.floor(p.clientHeight * dpr));
-      canvas.style.width  = p.clientWidth  + "px";
+      canvas.style.width = p.clientWidth + "px";
       canvas.style.height = p.clientHeight + "px";
     };
+
     const onResize = () => { dpr = Math.min(window.devicePixelRatio || 1, 2); resize(); };
-    resize(); window.addEventListener("resize", onResize);
+    const onVisibilityChange = () => { hidden = document.hidden; };
+    
+    resize();
+    window.addEventListener("resize", onResize);
+    document.addEventListener("visibilitychange", onVisibilityChange);
 
     const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
 
-    // Loop controller: play a gentle pass every 12–18s
-    let passStart = 0; // ms
-    let passDur = 2600; // ms of animation while active
-    const schedule = () => {
-      const wait = 12000 + Math.random() * 6000;
-      timer = window.setTimeout(() => { passStart = performance.now(); }, wait) as unknown as number;
-    };
-
-    // Helper: draw a soft ribbon along a curve on the right
-    const drawRibbon = (tActive: number) => {
+    const drawAurora = (now: number) => {
       const w = canvas.width, h = canvas.height;
+      const t = (now - t0) / 1000;
+      
+      ctx.clearRect(0, 0, w, h);
       ctx.save();
-      ctx.clearRect(0,0,w,h);
-      ctx.globalCompositeOperation = "lighter"; // screen-like
+      ctx.globalCompositeOperation = "screen";
 
-      const steps = 110; // density of points
-      const thickness = 22 * dpr; // base blur radius
-      // Progress (0..1) of the glide
-      const glide = Math.min(1, Math.max(0, tActive));
-      // Translate along X a little during the pass
-      const offsetX = (0.006 + 0.01 * glide) * w;
-
-      for (let i = 0; i <= steps; i++) {
-        const p = i / steps;
-        // Curve that roughly follows a right-hand mountain ridge area
-        const x = w * (0.60 + 0.18 * p) + offsetX + Math.sin((p + glide) * Math.PI * 2) * 6 * dpr;
-        const y = h * (0.30 + 0.18 * p) + Math.cos((p * 2 + glide) * Math.PI) * 4 * dpr;
-
-        // Color from neon-blue → indigo with subtle alpha
-        const hue = 210 + 40 * (1 - p);
-        const alpha = 0.10 + 0.18 * (1 - Math.abs(p - 0.55) * 1.8) * glide; // peaked mid-curve
-        const grad = ctx.createRadialGradient(x, y, 0, x, y, thickness);
-        grad.addColorStop(0, `hsla(${hue}, 90%, 70%, ${Math.min(0.28, alpha)})`);
-        grad.addColorStop(1, `hsla(${hue + 18}, 90%, 55%, 0)`);
-
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.arc(x, y, thickness, 0, Math.PI * 2);
-        ctx.fill();
+      // Responsive aurora dimensions
+      const isMobile = w < 768 * dpr;
+      const isTablet = w >= 768 * dpr && w < 1024 * dpr;
+      
+      let auroraLength = cfg.length * dpr;
+      let thickness = cfg.thickness * dpr;
+      
+      if (isMobile) {
+        auroraLength *= 0.6;
+        thickness *= 0.7;
+      } else if (isTablet) {
+        auroraLength *= 0.8;
+        thickness *= 0.85;
       }
+
+      // Aurora path: curved arc above mountain's right ridge
+      const startX = w * 0.45;
+      const startY = h * 0.25;
+      const endX = w * 0.85;
+      const endY = h * 0.35;
+      
+      const steps = Math.floor(auroraLength / (8 * dpr));
+      
+      // Color cycling: neon green base with blue/cyan edges
+      const hueShift = reduce ? 0 : Math.sin(t * cfg.hueShiftSpeed) * 15;
+      const baseHue = cfg.baseHue + hueShift; // 140° base (neon green)
+      const edgeHue = 190; // cyan-blue for edges
+
+      for (let i = 0; i < steps; i++) {
+        const progress = i / (steps - 1);
+        
+        // Base curve
+        const x = startX + (endX - startX) * progress;
+        const y = startY + (endY - startY) * progress + Math.sin(progress * Math.PI) * h * 0.08;
+        
+        // Noise-driven undulation
+        const noiseOffset = reduce ? 0 : noise(x * 0.1, y * 0.1, t * cfg.motionSpeed * 100) * 12 * dpr;
+        const finalX = x + noiseOffset;
+        const finalY = y + noiseOffset * 0.5;
+        
+        // Variable thickness along path
+        const thicknessMod = 0.8 + 0.4 * Math.sin(progress * Math.PI * 3 + t * 0.5);
+        const currentThickness = thickness * thicknessMod * (1 - Math.abs(progress - 0.5) * 0.3);
+        
+        // Tapering at ends
+        const edgeFade = Math.min(progress * 4, (1 - progress) * 4, 1);
+        
+        // Aurora layers for depth
+        for (let layer = 0; layer < 3; layer++) {
+          const layerScale = 1 - layer * 0.3;
+          const layerThickness = currentThickness * layerScale;
+          const layerAlpha = cfg.intensity * edgeFade * (0.8 - layer * 0.2);
+          
+          // Core (neon green)
+          if (layer === 0) {
+            const coreGrad = ctx.createRadialGradient(finalX, finalY, 0, finalX, finalY, layerThickness * 0.4);
+            coreGrad.addColorStop(0, `hsla(${baseHue}, 85%, 65%, ${layerAlpha})`);
+            coreGrad.addColorStop(0.7, `hsla(${baseHue}, 75%, 55%, ${layerAlpha * 0.6})`);
+            coreGrad.addColorStop(1, `hsla(${baseHue}, 65%, 45%, 0)`);
+            
+            ctx.fillStyle = coreGrad;
+            ctx.beginPath();
+            ctx.arc(finalX, finalY, layerThickness * 0.4, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          
+          // Edge glow (cyan/blue)
+          const edgeGrad = ctx.createRadialGradient(finalX, finalY, layerThickness * 0.3, finalX, finalY, layerThickness);
+          edgeGrad.addColorStop(0, `hsla(${edgeHue}, 90%, 70%, ${layerAlpha * 0.3})`);
+          edgeGrad.addColorStop(0.5, `hsla(${edgeHue + 20}, 85%, 60%, ${layerAlpha * 0.2})`);
+          edgeGrad.addColorStop(1, `hsla(${edgeHue}, 80%, 50%, 0)`);
+          
+          ctx.fillStyle = edgeGrad;
+          ctx.beginPath();
+          ctx.arc(finalX, finalY, layerThickness, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        
+        // Soft drop haze (bloom effect)
+        if (i % 3 === 0) {
+          const hazeGrad = ctx.createRadialGradient(finalX, finalY + thickness * 0.5, 0, finalX, finalY + thickness * 0.5, thickness * 1.5);
+          hazeGrad.addColorStop(0, `hsla(${baseHue}, 70%, 55%, ${cfg.intensity * 0.15 * edgeFade})`);
+          hazeGrad.addColorStop(1, `hsla(${baseHue}, 60%, 45%, 0)`);
+          
+          ctx.fillStyle = hazeGrad;
+          ctx.beginPath();
+          ctx.arc(finalX, finalY + thickness * 0.5, thickness * 1.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      
       ctx.restore();
     };
 
     const frame = (now: number) => {
       if (!running) return;
-      const w = canvas.width, h = canvas.height;
-      // idle background: ultra faint static tint
-      ctx.clearRect(0,0,w,h);
-      if (!reduce) {
-        let activeT = 0;
-        if (passStart > 0) {
-          activeT = Math.min(1, (now - passStart) / passDur);
-          // Draw during the pass and smoothly fade out afterwards
-          if (activeT <= 1) drawRibbon(activeT);
-          else { passStart = 0; schedule(); } // schedule next
-        }
-      } else {
-        // Reduced motion: render a single static faint crest
-        drawRibbon(0.3);
+      
+      // FPS throttling and tab visibility
+      if (hidden || (now - lastFrame < targetInterval)) {
+        raf = requestAnimationFrame(frame);
+        return;
       }
+      
+      lastFrame = now;
+      
+      if (reduce) {
+        // Static frame for reduced motion
+        if (lastFrame === now) drawAurora(t0 + 5000); // fixed time
+      } else {
+        drawAurora(now);
+      }
+      
       raf = requestAnimationFrame(frame);
     };
 
-    // kick it off
-    if (!reduce) schedule();
     raf = requestAnimationFrame(frame);
-    return () => { running = false; cancelAnimationFrame(raf); if (timer) clearTimeout(timer); window.removeEventListener("resize", onResize); };
+    
+    return () => {
+      running = false;
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", onResize);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
   }, []);
 
   return (
     <canvas
       ref={ref}
-      className="absolute inset-0 pointer-events-none z-30 mix-blend-screen"
-      style={{ opacity: 0.22 }}
+      className="absolute inset-0 pointer-events-none z-10"
+      style={{ opacity: 1 }}
     />
   );
 }
 
-/* ---------- Breathing ground fog (base, subtle) ---------- */
-function BreathingFog() {
+/* ---------- Scroll-Triggered Ground Fog ---------- */
+function ScrollTriggeredFog() {
   const fogRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     const el = fogRef.current!;
+    const section = document.querySelector('section[data-hero-section]') as HTMLElement;
+    if (!section) return;
+    
     let raf = 0, running = true, t0 = performance.now();
-    let boostUntil = 0; // timestamp for CTA boost end
+    let scrollProgress = 0;
+    
+    const { fog: cfg } = EFFECTS_CONFIG;
     const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
 
-    // CTA hover boost wiring via class hook
-    const cta = document.querySelector<HTMLAnchorElement>('a.js-primary-cta');
-    const onEnter = () => { boostUntil = performance.now() + 1100; };
-    const onLeave = () => { /* allow boost to decay naturally */ };
-    cta?.addEventListener('mouseenter', onEnter);
-    cta?.addEventListener('mouseleave', onLeave);
+    // Intersection Observer for scroll tracking
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (entry.isIntersecting) {
+          const rect = entry.boundingClientRect;
+          const viewportHeight = window.innerHeight;
+          
+          // Map scroll progress: 0 when hero top in view, 1 when nearly pinned bottom
+          const topInView = Math.max(0, -rect.top / viewportHeight);
+          const bottomApproach = Math.min(1, (viewportHeight - rect.bottom) / (viewportHeight * 0.4));
+          
+          scrollProgress = Math.min(1, Math.max(topInView, bottomApproach));
+        }
+      },
+      { threshold: 0, rootMargin: "0px 0px -10% 0px" }
+    );
+
+    observer.observe(section);
+
+    // Simple noise for turbulence
+    const noise = (x: number, y: number, time: number): number => {
+      return Math.sin(x * 0.01 + time) * Math.cos(y * 0.008 + time * 0.7) * 0.5;
+    };
 
     const tick = (now: number) => {
       if (!running) return;
-      const t = (now - t0) / 1000; // seconds
-      // Base breathing 2–3% scale at ~0.035Hz
-      const baseAmp = 0.02; // 2%
-      const base = 1 + (reduce ? 0 : baseAmp * Math.sin(t * (Math.PI * 2 * 0.035)));
-
-      // Idle pauses: very slow modulation of visibility
-      const idle = reduce ? 0.22 : 0.24 + 0.06 * Math.sin(t * 0.18);
-
-      // CTA boost for ~1s: slightly larger + a touch more opacity
-      const boosting = now < boostUntil ? 1 : 0;
-      const boostScale = boosting ? 0.015 : 0; // +1.5%
-      const boostOpacity = boosting ? 0.08 : 0;
-
-      const scale = Math.min(1.06, base + boostScale);
-      const opacity = Math.min(0.40, idle + boostOpacity);
-
-      el.style.transform = `scale(${scale}) translateZ(0)`;
-      el.style.opacity = String(opacity);
-
+      
+      const t = (now - t0) / 1000;
+      
+      // Scroll-based opacity mapping
+      const baseOpacity = 0.10 + (scrollProgress * 0.25); // 0.10 → 0.35
+      const maxOpacity = Math.min(cfg.intensity, baseOpacity);
+      
+      // Scroll-based scale mapping
+      const [minScale, maxScale] = cfg.scaleRange;
+      const scale = minScale + (scrollProgress * (maxScale - minScale));
+      
+      // Subtle drift and turbulence (if motion enabled)
+      const driftX = reduce ? 0 : (t * cfg.driftSpeed) % 100;
+      const turbulence = reduce ? 0 : noise(t * 50, t * 30, t * cfg.turbulenceSpeed) * 3;
+      
+      // Apply transforms and opacity
+      el.style.transform = `
+        scale(${scale}) 
+        translateX(${driftX + turbulence}px) 
+        translateZ(0)
+      `;
+      el.style.opacity = String(maxOpacity);
+      
       raf = requestAnimationFrame(tick);
     };
+
     raf = requestAnimationFrame(tick);
-    return () => { running = false; cancelAnimationFrame(raf); cta?.removeEventListener('mouseenter', onEnter); cta?.removeEventListener('mouseleave', onLeave); };
+    
+    return () => {
+      running = false;
+      cancelAnimationFrame(raf);
+      observer.disconnect();
+    };
   }, []);
 
   return (
     <div
       ref={fogRef}
-      className="pointer-events-none absolute z-30"
+      className="pointer-events-none absolute z-10"
       style={{
-        left: "-6vw",
-        right: "-6vw",
-        bottom: "-10vh",
-        height: "45vh",
-        filter: "blur(36px)",
+        left: "-8vw",
+        right: "-8vw", 
+        bottom: "-12vh",
+        height: "50vh",
+        filter: "blur(42px)",
         mixBlendMode: "screen",
         transformOrigin: "center bottom",
-        opacity: 0.28,
+        opacity: 0.10,
         background: [
-          // Soft layered fog, biased to the right base
-          "radial-gradient(70% 80% at 80% 100%, rgba(62,110,210,.22), rgba(0,0,0,0) 58%)",
-          "radial-gradient(60% 50% at 60% 100%, rgba(32,70,150,.16), rgba(0,0,0,0) 60%)",
+          // Deep navy base with cyan haze - 3 layered fields
+          `radial-gradient(75% 85% at 75% 100%, 
+            hsla(${EFFECTS_CONFIG.fog.baseHue}, 60%, 35%, 0.25), 
+            hsla(${EFFECTS_CONFIG.fog.baseHue}, 70%, 45%, 0.12) 45%, 
+            transparent 65%)`,
+          `radial-gradient(60% 70% at 60% 100%, 
+            hsla(${EFFECTS_CONFIG.fog.baseHue - 30}, 75%, 50%, 0.18), 
+            transparent 55%)`,
+          `radial-gradient(90% 60% at 50% 100%, 
+            rgba(70,160,220,0.12), 
+            transparent 50%)`
         ].join(", "),
       }}
     />
@@ -352,7 +496,7 @@ export default function InteractiveHero() {
   }, []);
 
   return (
-    <section ref={wrap} className="relative overflow-hidden min-h-[calc(var(--vh,1vh)*100)] bg-[var(--hero-deep)]">
+    <section ref={wrap} data-hero-section className="relative overflow-hidden min-h-[calc(var(--vh,1vh)*100)] bg-[var(--hero-deep)]">
       <NavBar />
 
       {/* SKY gradient (behind everything) */}
@@ -366,6 +510,12 @@ export default function InteractiveHero() {
 
       <Stars count={300} />
       <Meteor />
+
+      {/* Realistic Neon-Green Aurora (z-10, above stars, behind mountain) */}
+      <RealisticAurora />
+
+      {/* Scroll-Triggered Ground Fog (z-10, behind mountain) */}
+      <ScrollTriggeredFog />
 
       {/* Base mountain (no glow) */}
       <motion.img
@@ -415,10 +565,6 @@ export default function InteractiveHero() {
           animation: "glowPulse 9s ease-in-out infinite",
         }}
       />
-
-      {/* Atmospheric micro-interactions (above mountain, behind text) */}
-      <AuroraCrest />
-      <BreathingFog />
 
       {/* Peak crest under-glow (subtle, screen blend) */}
       <div
