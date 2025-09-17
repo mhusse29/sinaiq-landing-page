@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, useScroll, useTransform } from "framer-motion";
 import NavBar from "./NavBar";
 import PillButton from "./ui/PillButton";
@@ -9,20 +9,23 @@ const SKY_CUTOFF = 0.62; // stars/meteor draw only above 62% of hero height
 // Aurora & Fog Configuration
 const EFFECTS_CONFIG = {
   aurora: {
-    intensity: 0.32,        // max opacity
-    hueShiftSpeed: 0.05,    // color cycle speed (0.02 = slower, 0.08 = faster)
-    motionSpeed: 10,        // px/s noise movement
-    baseHue: 140,          // neon green base hue
-    length: 1200,          // desktop length in px
-    thickness: 120,        // base thickness in px
-    fps: 35,               // target FPS
+    intensity: 0.14,        // global max opacity (hard cap)
+    peakIntensity: 0.20,    // local peak alpha spikes
+    driftSpeed: 7.5,        // px/s leftward drift (desktop)
+    undulationAmp: 11,      // px amplitude for noise undulation
+    length: 1400,           // desktop length in px
+    thickness: 100,         // base thickness in px
+    fps: 35,                // target FPS
+    fadeOutWidth: 0.23,     // fade out over last 23% of width
   },
   fog: {
-    intensity: 0.35,       // max opacity on scroll
-    driftSpeed: 1.5,       // px/s horizontal drift
-    turbulenceSpeed: 0.03, // noise animation speed
-    scaleRange: [1.00, 1.03], // scale from/to on scroll
-    baseHue: 210,         // blue-gray base hue
+    baseOpacity: 0.10,      // at 0% scroll
+    midOpacity: 0.22,       // at 60% scroll
+    maxOpacity: 0.32,       // at 95-100% scroll (capped)
+    scaleRange: [1.00, 1.02], // scale from/to on scroll
+    driftSpeed: 1.8,        // px/s convection drift
+    turbulenceSpeed: 0.02,  // noise wobble speed
+    baseHue: 210,          // blue-navy base hue
   }
 };
 
@@ -190,8 +193,8 @@ function Meteor() {
   return <canvas ref={ref} className="absolute inset-0 z-0 pointer-events-none" />;
 }
 
-/* ---------- Realistic Neon-Green Aurora ---------- */
-function RealisticAurora() {
+/* ---------- Subtle Realistic Aurora ---------- */
+function RealisticAurora({ debugIntensity }: { debugIntensity?: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   
   useEffect(() => {
@@ -205,10 +208,10 @@ function RealisticAurora() {
     const targetInterval = 1000 / cfg.fps;
     let lastFrame = 0;
 
-    // Simple noise function (pseudo-Perlin)
+    // Simple noise function for subtle undulation
     const noise = (x: number, y: number, time: number): number => {
-      const a = Math.sin(x * 0.01 + time * 0.001) * Math.cos(y * 0.008 + time * 0.0008);
-      const b = Math.sin(x * 0.017 + time * 0.0006) * Math.cos(y * 0.013 + time * 0.0012);
+      const a = Math.sin(x * 0.008 + time * 0.0003) * Math.cos(y * 0.005 + time * 0.0002);
+      const b = Math.sin(x * 0.012 + time * 0.0004) * Math.cos(y * 0.009 + time * 0.0005);
       return (a + b) * 0.5;
     };
 
@@ -235,97 +238,100 @@ function RealisticAurora() {
       
       ctx.clearRect(0, 0, w, h);
       ctx.save();
-      ctx.globalCompositeOperation = "screen";
+      ctx.globalCompositeOperation = "lighter"; // additive for star visibility
 
-      // Responsive aurora dimensions
+      // Responsive aurora dimensions with text margins
       const isMobile = w < 768 * dpr;
       const isTablet = w >= 768 * dpr && w < 1024 * dpr;
       
       let auroraLength = cfg.length * dpr;
       let thickness = cfg.thickness * dpr;
+      let driftSpeed = cfg.driftSpeed;
       
       if (isMobile) {
-        auroraLength *= 0.6;
-        thickness *= 0.7;
+        auroraLength *= 0.65;
+        thickness *= 0.75;
+        driftSpeed *= 0.7; // proportionally slower
       } else if (isTablet) {
-        auroraLength *= 0.8;
-        thickness *= 0.85;
+        auroraLength *= 0.85;
+        thickness *= 0.9;
+        driftSpeed *= 0.85;
       }
 
-      // Aurora path: curved arc above mountain's right ridge
-      const startX = w * 0.45;
-      const startY = h * 0.25;
-      const endX = w * 0.85;
-      const endY = h * 0.35;
+      // Leftward drift position
+      const driftOffset = reduce ? 0 : (t * driftSpeed * dpr) % (w + auroraLength);
       
-      const steps = Math.floor(auroraLength / (8 * dpr));
+      // Aurora path: curved arc above mountain's right ridge, with margin from text
+      const textMargin = 16 * dpr; // minimum margin from text
+      const startX = w * 0.55 + textMargin - driftOffset; // starts further right, drifts left
+      const startY = h * 0.22;
+      const endX = startX + auroraLength;
+      const endY = h * 0.32;
       
-      // Color cycling: neon green base with blue/cyan edges
-      const hueShift = reduce ? 0 : Math.sin(t * cfg.hueShiftSpeed) * 15;
-      const baseHue = cfg.baseHue + hueShift; // 140° base (neon green)
-      const edgeHue = 190; // cyan-blue for edges
-
+      const steps = Math.floor(auroraLength / (6 * dpr));
+      
+      // Use debug intensity if provided, otherwise use config
+      const globalIntensity = debugIntensity !== undefined ? debugIntensity : cfg.intensity;
+      
       for (let i = 0; i < steps; i++) {
         const progress = i / (steps - 1);
+        const segmentX = startX + (endX - startX) * progress;
         
-        // Base curve
-        const x = startX + (endX - startX) * progress;
-        const y = startY + (endY - startY) * progress + Math.sin(progress * Math.PI) * h * 0.08;
+        // Skip if segment is completely off-screen left
+        if (segmentX + thickness < -50 * dpr) continue;
         
-        // Noise-driven undulation
-        const noiseOffset = reduce ? 0 : noise(x * 0.1, y * 0.1, t * cfg.motionSpeed * 100) * 12 * dpr;
-        const finalX = x + noiseOffset;
-        const finalY = y + noiseOffset * 0.5;
+        // Base curve with gentle arc
+        const x = segmentX;
+        const y = startY + (endY - startY) * progress + Math.sin(progress * Math.PI * 0.8) * h * 0.06;
         
-        // Variable thickness along path
-        const thicknessMod = 0.8 + 0.4 * Math.sin(progress * Math.PI * 3 + t * 0.5);
-        const currentThickness = thickness * thicknessMod * (1 - Math.abs(progress - 0.5) * 0.3);
+        // Subtle noise-driven undulation
+        const undulation = reduce ? 0 : noise(x * 0.02, y * 0.02, t * 20) * cfg.undulationAmp * dpr;
+        const finalX = x + undulation;
+        const finalY = y + undulation * 0.3;
         
-        // Tapering at ends
-        const edgeFade = Math.min(progress * 4, (1 - progress) * 4, 1);
+        // Fade out as band exits left (last 23% of width)
+        const fadeZone = auroraLength * cfg.fadeOutWidth;
+        const distanceFromLeft = finalX - startX;
+        let fadeMultiplier = 1;
         
-        // Aurora layers for depth
-        for (let layer = 0; layer < 3; layer++) {
-          const layerScale = 1 - layer * 0.3;
-          const layerThickness = currentThickness * layerScale;
-          const layerAlpha = cfg.intensity * edgeFade * (0.8 - layer * 0.2);
-          
-          // Core (neon green)
-          if (layer === 0) {
-            const coreGrad = ctx.createRadialGradient(finalX, finalY, 0, finalX, finalY, layerThickness * 0.4);
-            coreGrad.addColorStop(0, `hsla(${baseHue}, 85%, 65%, ${layerAlpha})`);
-            coreGrad.addColorStop(0.7, `hsla(${baseHue}, 75%, 55%, ${layerAlpha * 0.6})`);
-            coreGrad.addColorStop(1, `hsla(${baseHue}, 65%, 45%, 0)`);
-            
-            ctx.fillStyle = coreGrad;
-            ctx.beginPath();
-            ctx.arc(finalX, finalY, layerThickness * 0.4, 0, Math.PI * 2);
-            ctx.fill();
-          }
-          
-          // Edge glow (cyan/blue)
-          const edgeGrad = ctx.createRadialGradient(finalX, finalY, layerThickness * 0.3, finalX, finalY, layerThickness);
-          edgeGrad.addColorStop(0, `hsla(${edgeHue}, 90%, 70%, ${layerAlpha * 0.3})`);
-          edgeGrad.addColorStop(0.5, `hsla(${edgeHue + 20}, 85%, 60%, ${layerAlpha * 0.2})`);
-          edgeGrad.addColorStop(1, `hsla(${edgeHue}, 80%, 50%, 0)`);
-          
-          ctx.fillStyle = edgeGrad;
-          ctx.beginPath();
-          ctx.arc(finalX, finalY, layerThickness, 0, Math.PI * 2);
-          ctx.fill();
+        if (distanceFromLeft > auroraLength - fadeZone) {
+          const fadeProgress = (distanceFromLeft - (auroraLength - fadeZone)) / fadeZone;
+          fadeMultiplier = Math.max(0, 1 - fadeProgress);
         }
         
-        // Soft drop haze (bloom effect)
-        if (i % 3 === 0) {
-          const hazeGrad = ctx.createRadialGradient(finalX, finalY + thickness * 0.5, 0, finalX, finalY + thickness * 0.5, thickness * 1.5);
-          hazeGrad.addColorStop(0, `hsla(${baseHue}, 70%, 55%, ${cfg.intensity * 0.15 * edgeFade})`);
-          hazeGrad.addColorStop(1, `hsla(${baseHue}, 60%, 45%, 0)`);
-          
-          ctx.fillStyle = hazeGrad;
-          ctx.beginPath();
-          ctx.arc(finalX, finalY + thickness * 0.5, thickness * 1.5, 0, Math.PI * 2);
-          ctx.fill();
-        }
+        // Skip invisible segments
+        if (fadeMultiplier <= 0.01) continue;
+        
+        // Variable thickness with noise
+        const thicknessNoise = 0.8 + 0.3 * Math.sin(progress * Math.PI * 4 + t * 0.3);
+        const currentThickness = thickness * thicknessNoise;
+        
+        // Filament intensity variation for realistic aurora
+        const filamentIntensity = 0.6 + 0.4 * Math.sin(progress * Math.PI * 6 + t * 0.4);
+        const peakAlpha = Math.min(cfg.peakIntensity, globalIntensity * 1.4) * filamentIntensity * fadeMultiplier;
+        const baseAlpha = globalIntensity * filamentIntensity * fadeMultiplier;
+        
+        // Core filament (neon green with low saturation)
+        const coreGrad = ctx.createRadialGradient(finalX, finalY, 0, finalX, finalY, currentThickness * 0.3);
+        coreGrad.addColorStop(0, `rgba(91, 255, 122, ${peakAlpha})`); // #5BFF7A
+        coreGrad.addColorStop(0.4, `rgba(42, 229, 184, ${baseAlpha * 0.7})`); // #2AE5B8
+        coreGrad.addColorStop(1, `rgba(42, 229, 184, 0)`);
+        
+        ctx.fillStyle = coreGrad;
+        ctx.beginPath();
+        ctx.arc(finalX, finalY, currentThickness * 0.3, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Fringe glow (cyan at 12-18%)
+        const fringeGrad = ctx.createRadialGradient(finalX, finalY, currentThickness * 0.2, finalX, finalY, currentThickness * 0.8);
+        fringeGrad.addColorStop(0, `rgba(127, 232, 255, ${baseAlpha * 0.18})`); // #7FE8FF
+        fringeGrad.addColorStop(0.6, `rgba(127, 232, 255, ${baseAlpha * 0.12})`);
+        fringeGrad.addColorStop(1, `rgba(127, 232, 255, 0)`);
+        
+        ctx.fillStyle = fringeGrad;
+        ctx.beginPath();
+        ctx.arc(finalX, finalY, currentThickness * 0.8, 0, Math.PI * 2);
+        ctx.fill();
       }
       
       ctx.restore();
@@ -341,14 +347,7 @@ function RealisticAurora() {
       }
       
       lastFrame = now;
-      
-      if (reduce) {
-        // Static frame for reduced motion
-        if (lastFrame === now) drawAurora(t0 + 5000); // fixed time
-      } else {
-        drawAurora(now);
-      }
-      
+      drawAurora(now);
       raf = requestAnimationFrame(frame);
     };
 
@@ -360,7 +359,7 @@ function RealisticAurora() {
       window.removeEventListener("resize", onResize);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, []);
+  }, [debugIntensity]);
 
   return (
     <canvas
@@ -372,7 +371,7 @@ function RealisticAurora() {
 }
 
 /* ---------- Scroll-Triggered Ground Fog ---------- */
-function ScrollTriggeredFog() {
+function ScrollTriggeredFog({ debugOpacity }: { debugOpacity?: number }) {
   const fogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -386,29 +385,47 @@ function ScrollTriggeredFog() {
     const { fog: cfg } = EFFECTS_CONFIG;
     const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
 
-    // Intersection Observer for scroll tracking
+    // Intersection Observer for precise scroll tracking
     const observer = new IntersectionObserver(
       (entries) => {
         const entry = entries[0];
         if (entry.isIntersecting) {
           const rect = entry.boundingClientRect;
-          const viewportHeight = window.innerHeight;
           
-          // Map scroll progress: 0 when hero top in view, 1 when nearly pinned bottom
-          const topInView = Math.max(0, -rect.top / viewportHeight);
-          const bottomApproach = Math.min(1, (viewportHeight - rect.bottom) / (viewportHeight * 0.4));
-          
-          scrollProgress = Math.min(1, Math.max(topInView, bottomApproach));
+          // Improved scroll progress mapping
+          if (rect.top >= 0) {
+            // Hero top is visible - 0% progress
+            scrollProgress = 0;
+          } else {
+            // Hero is scrolling up
+            const scrolled = Math.abs(rect.top);
+            const heroHeight = rect.height;
+            
+            // More precise mapping: 0% → 60% → 95-100%
+            if (scrolled < heroHeight * 0.6) {
+              // 0% to 60% of hero scrolled
+              scrollProgress = scrolled / (heroHeight * 0.6) * 0.6;
+            } else {
+              // 60% to 100% of hero scrolled
+              const remainingScroll = scrolled - (heroHeight * 0.6);
+              const remainingHeight = heroHeight * 0.4;
+              scrollProgress = 0.6 + (remainingScroll / remainingHeight) * 0.4;
+              scrollProgress = Math.min(1, scrollProgress);
+            }
+          }
+        } else if (entry.boundingClientRect.bottom < 0) {
+          // Hero completely scrolled past
+          scrollProgress = 1;
         }
       },
-      { threshold: 0, rootMargin: "0px 0px -10% 0px" }
+      { threshold: 0, rootMargin: "0px" }
     );
 
     observer.observe(section);
 
-    // Simple noise for turbulence
+    // Subtle noise for convection movement
     const noise = (x: number, y: number, time: number): number => {
-      return Math.sin(x * 0.01 + time) * Math.cos(y * 0.008 + time * 0.7) * 0.5;
+      return Math.sin(x * 0.006 + time * 0.8) * Math.cos(y * 0.004 + time * 0.5) * 0.5;
     };
 
     const tick = (now: number) => {
@@ -416,25 +433,38 @@ function ScrollTriggeredFog() {
       
       const t = (now - t0) / 1000;
       
-      // Scroll-based opacity mapping
-      const baseOpacity = 0.10 + (scrollProgress * 0.25); // 0.10 → 0.35
-      const maxOpacity = Math.min(cfg.intensity, baseOpacity);
+      // Use debug opacity if provided, otherwise calculate from scroll
+      let opacity: number;
+      if (debugOpacity !== undefined) {
+        opacity = debugOpacity;
+      } else {
+        // Improved opacity mapping: 0.10 → 0.22 → 0.32
+        if (scrollProgress <= 0.6) {
+          // 0% to 60%: 0.10 → 0.22
+          opacity = cfg.baseOpacity + (scrollProgress / 0.6) * (cfg.midOpacity - cfg.baseOpacity);
+        } else {
+          // 60% to 100%: 0.22 → 0.32
+          const remainingProgress = (scrollProgress - 0.6) / 0.4;
+          opacity = cfg.midOpacity + remainingProgress * (cfg.maxOpacity - cfg.midOpacity);
+        }
+        opacity = Math.min(cfg.maxOpacity, opacity);
+      }
       
-      // Scroll-based scale mapping
+      // Scale mapping with improved progression
       const [minScale, maxScale] = cfg.scaleRange;
       const scale = minScale + (scrollProgress * (maxScale - minScale));
       
-      // Subtle drift and turbulence (if motion enabled)
-      const driftX = reduce ? 0 : (t * cfg.driftSpeed) % 100;
-      const turbulence = reduce ? 0 : noise(t * 50, t * 30, t * cfg.turbulenceSpeed) * 3;
+      // Convection drift and subtle turbulence
+      const driftX = reduce ? 0 : (t * cfg.driftSpeed) % 120;
+      const turbulence = reduce ? 0 : noise(t * 40, t * 25, t * cfg.turbulenceSpeed * 50) * 2;
       
-      // Apply transforms and opacity
+      // Apply transforms and opacity with smoother animation
       el.style.transform = `
         scale(${scale}) 
         translateX(${driftX + turbulence}px) 
         translateZ(0)
       `;
-      el.style.opacity = String(maxOpacity);
+      el.style.opacity = String(opacity);
       
       raf = requestAnimationFrame(tick);
     };
@@ -446,42 +476,117 @@ function ScrollTriggeredFog() {
       cancelAnimationFrame(raf);
       observer.disconnect();
     };
-  }, []);
+  }, [debugOpacity]);
 
   return (
     <div
       ref={fogRef}
       className="pointer-events-none absolute z-10"
       style={{
-        left: "-8vw",
-        right: "-8vw", 
-        bottom: "-12vh",
-        height: "50vh",
-        filter: "blur(42px)",
+        left: "-10vw",
+        right: "-10vw", 
+        bottom: "-14vh",
+        height: "55vh",
+        filter: "blur(48px)",
         mixBlendMode: "screen",
         transformOrigin: "center bottom",
         opacity: 0.10,
         background: [
-          // Deep navy base with cyan haze - 3 layered fields
-          `radial-gradient(75% 85% at 75% 100%, 
-            hsla(${EFFECTS_CONFIG.fog.baseHue}, 60%, 35%, 0.25), 
-            hsla(${EFFECTS_CONFIG.fog.baseHue}, 70%, 45%, 0.12) 45%, 
+          // Deep navy base (#0A1A2A) with cyan haze - 3 layered volumetric fields
+          `radial-gradient(80% 90% at 70% 100%, 
+            rgba(10, 26, 42, 0.28), 
+            rgba(15, 35, 55, 0.16) 40%, 
+            transparent 70%)`,
+          `radial-gradient(65% 75% at 55% 100%, 
+            rgba(25, 45, 75, 0.20), 
+            rgba(35, 60, 95, 0.12) 50%, 
             transparent 65%)`,
-          `radial-gradient(60% 70% at 60% 100%, 
-            hsla(${EFFECTS_CONFIG.fog.baseHue - 30}, 75%, 50%, 0.18), 
-            transparent 55%)`,
-          `radial-gradient(90% 60% at 50% 100%, 
-            rgba(70,160,220,0.12), 
-            transparent 50%)`
+          `radial-gradient(95% 65% at 50% 100%, 
+            rgba(70, 160, 220, 0.16), 
+            rgba(90, 180, 240, 0.08) 45%, 
+            transparent 55%)`
         ].join(", "),
       }}
     />
   );
 }
 
+/* ---------- Scene Debug Panel (dev only) ---------- */
+function SceneDebugPanel({ 
+  auroraIntensity, 
+  setAuroraIntensity, 
+  fogOpacity, 
+  setFogOpacity, 
+  enabled, 
+  setEnabled 
+}: {
+  auroraIntensity: number;
+  setAuroraIntensity: (v: number) => void;
+  fogOpacity: number;
+  setFogOpacity: (v: number) => void;
+  enabled: boolean;
+  setEnabled: (v: boolean) => void;
+}) {
+  if (import.meta.env.PROD) return null; // Only show in development
+  
+  return (
+    <div className="fixed top-4 right-4 z-[60] bg-black/80 backdrop-blur-sm rounded-lg p-4 text-white text-sm font-mono">
+      <div className="flex items-center gap-2 mb-3">
+        <input 
+          type="checkbox" 
+          checked={enabled} 
+          onChange={(e) => setEnabled(e.target.checked)}
+          className="w-4 h-4"
+        />
+        <span className="font-semibold">Scene Debug</span>
+      </div>
+      
+      {enabled && (
+        <div className="space-y-3 min-w-[200px]">
+          <div>
+            <label className="block mb-1">Aurora Intensity: {auroraIntensity.toFixed(2)}</label>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value={auroraIntensity}
+              onChange={(e) => setAuroraIntensity(parseFloat(e.target.value))}
+              className="w-full"
+            />
+          </div>
+          
+          <div>
+            <label className="block mb-1">Fog Opacity: {fogOpacity.toFixed(2)}</label>
+            <input
+              type="range"
+              min="0"
+              max="0.35"
+              step="0.01"
+              value={fogOpacity}
+              onChange={(e) => setFogOpacity(parseFloat(e.target.value))}
+              className="w-full"
+            />
+          </div>
+          
+          <div className="text-xs text-gray-400 mt-2">
+            <div>Aurora: {enabled ? 'Override' : 'Animated'}</div>
+            <div>Fog: {enabled ? 'Override' : 'Scroll-driven'}</div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** ====== MAIN HERO ====== */
 export default function InteractiveHero() {
   const wrap = useRef<HTMLElement>(null);
+  
+  // Debug state (dev only)
+  const [debugEnabled, setDebugEnabled] = useState(false);
+  const [debugAuroraIntensity, setDebugAuroraIntensity] = useState(EFFECTS_CONFIG.aurora.intensity);
+  const [debugFogOpacity, setDebugFogOpacity] = useState(EFFECTS_CONFIG.fog.baseOpacity);
 
   // subtle parallax on scroll (optional)
   const { scrollYProgress } = useScroll({ target: wrap, offset: ["start start","end start"]});
@@ -512,10 +617,10 @@ export default function InteractiveHero() {
       <Meteor />
 
       {/* Realistic Neon-Green Aurora (z-10, above stars, behind mountain) */}
-      <RealisticAurora />
+      <RealisticAurora debugIntensity={debugEnabled ? debugAuroraIntensity : undefined} />
 
       {/* Scroll-Triggered Ground Fog (z-10, behind mountain) */}
-      <ScrollTriggeredFog />
+      <ScrollTriggeredFog debugOpacity={debugEnabled ? debugFogOpacity : undefined} />
 
       {/* Base mountain (no glow) */}
       <motion.img
@@ -670,6 +775,16 @@ export default function InteractiveHero() {
           }
         }
       `}</style>
+
+      {/* Scene Debug Panel (dev only) */}
+      <SceneDebugPanel
+        auroraIntensity={debugAuroraIntensity}
+        setAuroraIntensity={setDebugAuroraIntensity}
+        fogOpacity={debugFogOpacity}
+        setFogOpacity={setDebugFogOpacity}
+        enabled={debugEnabled}
+        setEnabled={setDebugEnabled}
+      />
     </section>
   );
 }
