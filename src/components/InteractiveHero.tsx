@@ -170,6 +170,171 @@ function Meteor() {
   return <canvas ref={ref} className="absolute inset-0 z-0 pointer-events-none" />;
 }
 
+/* ---------- Aurora crest (subtle ribbon near right ridge) ---------- */
+function AuroraCrest() {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const canvas = ref.current!;
+    const ctx = canvas.getContext("2d", { alpha: true })!;
+    let dpr = Math.min(window.devicePixelRatio || 1, 2);
+    let raf = 0; let timer: number | undefined; let running = true;
+
+    const resize = () => {
+      const p = canvas.parentElement!;
+      canvas.width  = Math.max(1, Math.floor(p.clientWidth  * dpr));
+      canvas.height = Math.max(1, Math.floor(p.clientHeight * dpr));
+      canvas.style.width  = p.clientWidth  + "px";
+      canvas.style.height = p.clientHeight + "px";
+    };
+    const onResize = () => { dpr = Math.min(window.devicePixelRatio || 1, 2); resize(); };
+    resize(); window.addEventListener("resize", onResize);
+
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
+
+    // Loop controller: play a gentle pass every 12–18s
+    let passStart = 0; // ms
+    let passDur = 2600; // ms of animation while active
+    const schedule = () => {
+      const wait = 12000 + Math.random() * 6000;
+      timer = window.setTimeout(() => { passStart = performance.now(); }, wait) as unknown as number;
+    };
+
+    // Helper: draw a soft ribbon along a curve on the right
+    const drawRibbon = (tActive: number) => {
+      const w = canvas.width, h = canvas.height;
+      ctx.save();
+      ctx.clearRect(0,0,w,h);
+      ctx.globalCompositeOperation = "lighter"; // screen-like
+
+      const steps = 110; // density of points
+      const thickness = 22 * dpr; // base blur radius
+      // Progress (0..1) of the glide
+      const glide = Math.min(1, Math.max(0, tActive));
+      // Translate along X a little during the pass
+      const offsetX = (0.006 + 0.01 * glide) * w;
+
+      for (let i = 0; i <= steps; i++) {
+        const p = i / steps;
+        // Curve that roughly follows a right-hand mountain ridge area
+        const x = w * (0.60 + 0.18 * p) + offsetX + Math.sin((p + glide) * Math.PI * 2) * 6 * dpr;
+        const y = h * (0.30 + 0.18 * p) + Math.cos((p * 2 + glide) * Math.PI) * 4 * dpr;
+
+        // Color from neon-blue → indigo with subtle alpha
+        const hue = 210 + 40 * (1 - p);
+        const alpha = 0.10 + 0.18 * (1 - Math.abs(p - 0.55) * 1.8) * glide; // peaked mid-curve
+        const grad = ctx.createRadialGradient(x, y, 0, x, y, thickness);
+        grad.addColorStop(0, `hsla(${hue}, 90%, 70%, ${Math.min(0.28, alpha)})`);
+        grad.addColorStop(1, `hsla(${hue + 18}, 90%, 55%, 0)`);
+
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(x, y, thickness, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    };
+
+    const frame = (now: number) => {
+      if (!running) return;
+      const w = canvas.width, h = canvas.height;
+      // idle background: ultra faint static tint
+      ctx.clearRect(0,0,w,h);
+      if (!reduce) {
+        let activeT = 0;
+        if (passStart > 0) {
+          activeT = Math.min(1, (now - passStart) / passDur);
+          // Draw during the pass and smoothly fade out afterwards
+          if (activeT <= 1) drawRibbon(activeT);
+          else { passStart = 0; schedule(); } // schedule next
+        }
+      } else {
+        // Reduced motion: render a single static faint crest
+        drawRibbon(0.3);
+      }
+      raf = requestAnimationFrame(frame);
+    };
+
+    // kick it off
+    if (!reduce) schedule();
+    raf = requestAnimationFrame(frame);
+    return () => { running = false; cancelAnimationFrame(raf); if (timer) clearTimeout(timer); window.removeEventListener("resize", onResize); };
+  }, []);
+
+  return (
+    <canvas
+      ref={ref}
+      className="absolute inset-0 pointer-events-none z-30 mix-blend-screen"
+      style={{ opacity: 0.22 }}
+    />
+  );
+}
+
+/* ---------- Breathing ground fog (base, subtle) ---------- */
+function BreathingFog() {
+  const fogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = fogRef.current!;
+    let raf = 0, running = true, t0 = performance.now();
+    let boostUntil = 0; // timestamp for CTA boost end
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
+
+    // CTA hover boost wiring via class hook
+    const cta = document.querySelector<HTMLAnchorElement>('a.js-primary-cta');
+    const onEnter = () => { boostUntil = performance.now() + 1100; };
+    const onLeave = () => { /* allow boost to decay naturally */ };
+    cta?.addEventListener('mouseenter', onEnter);
+    cta?.addEventListener('mouseleave', onLeave);
+
+    const tick = (now: number) => {
+      if (!running) return;
+      const t = (now - t0) / 1000; // seconds
+      // Base breathing 2–3% scale at ~0.035Hz
+      const baseAmp = 0.02; // 2%
+      const base = 1 + (reduce ? 0 : baseAmp * Math.sin(t * (Math.PI * 2 * 0.035)));
+
+      // Idle pauses: very slow modulation of visibility
+      const idle = reduce ? 0.22 : 0.24 + 0.06 * Math.sin(t * 0.18);
+
+      // CTA boost for ~1s: slightly larger + a touch more opacity
+      const boosting = now < boostUntil ? 1 : 0;
+      const boostScale = boosting ? 0.015 : 0; // +1.5%
+      const boostOpacity = boosting ? 0.08 : 0;
+
+      const scale = Math.min(1.06, base + boostScale);
+      const opacity = Math.min(0.40, idle + boostOpacity);
+
+      el.style.transform = `scale(${scale}) translateZ(0)`;
+      el.style.opacity = String(opacity);
+
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => { running = false; cancelAnimationFrame(raf); cta?.removeEventListener('mouseenter', onEnter); cta?.removeEventListener('mouseleave', onLeave); };
+  }, []);
+
+  return (
+    <div
+      ref={fogRef}
+      className="pointer-events-none absolute z-30"
+      style={{
+        left: "-6vw",
+        right: "-6vw",
+        bottom: "-10vh",
+        height: "45vh",
+        filter: "blur(36px)",
+        mixBlendMode: "screen",
+        transformOrigin: "center bottom",
+        opacity: 0.28,
+        background: [
+          // Soft layered fog, biased to the right base
+          "radial-gradient(70% 80% at 80% 100%, rgba(62,110,210,.22), rgba(0,0,0,0) 58%)",
+          "radial-gradient(60% 50% at 60% 100%, rgba(32,70,150,.16), rgba(0,0,0,0) 60%)",
+        ].join(", "),
+      }}
+    />
+  );
+}
+
 /** ====== MAIN HERO ====== */
 export default function InteractiveHero() {
   const wrap = useRef<HTMLElement>(null);
@@ -251,6 +416,10 @@ export default function InteractiveHero() {
         }}
       />
 
+      {/* Atmospheric micro-interactions (above mountain, behind text) */}
+      <AuroraCrest />
+      <BreathingFog />
+
       {/* Peak crest under-glow (subtle, screen blend) */}
       <div
         className="pointer-events-none absolute z-30 mix-blend-screen"
@@ -311,7 +480,7 @@ export default function InteractiveHero() {
         }}
       />
 
-      {/* COPY (z-40) */}
+      {/* COPY (z-40 → above overlays) */}
       <div className="relative z-40 mx-auto max-w-7xl px-6 pt-32 sm:pt-40 md:pt-48 pb-28">
         <div className="grid grid-cols-12">
           <div className="col-span-12 md:col-span-8 lg:col-span-7 xl:col-span-6">
@@ -328,7 +497,7 @@ export default function InteractiveHero() {
               We blend creativity, data, and AI to deliver marketing strategies that drive business growth and engage your audience.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
-              <PillButton variant="primary" size="lg" href="#consult">Get Your Free Consultation</PillButton>
+              <PillButton className="js-primary-cta" variant="primary" size="lg" href="#consult">Get Your Free Consultation</PillButton>
               <PillButton variant="outline" size="lg" href="#work">See our work</PillButton>
             </div>
           </div>
